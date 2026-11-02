@@ -200,7 +200,8 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
         Motor::CANPackageSend(); // 给电机发包，进行控制
 
         if(cnt>20){
-            if(vccBat<10)HAL_IWDG_Refresh(&hiwdg);
+            // 只有初始化过 IWDG 才能刷新，否则写空指针会 HardFault
+            if(vccBat<10 && hiwdg.Instance != nullptr)HAL_IWDG_Refresh(&hiwdg);
             cnt = 0;
         }
     }

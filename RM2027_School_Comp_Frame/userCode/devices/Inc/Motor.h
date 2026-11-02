@@ -112,6 +112,7 @@ private:
 
     int16_t IntensityCalc();
     int32_t lastRead = 0;
+    uint32_t lastFeedbackTick = 0;
 };
 /*结构体成员取值定义组------------------------------------------------------*/
 
@@ -136,10 +137,10 @@ private:
 #define MOTOR_ID_14 0x00002000u
 #define MOTOR_ID_15 0x00004000u
 #define MOTOR_ID_16 0x00008000u
-#define MOTOR_ID_CAN1_1_MASK MOTOR_ID_1|MOTOR_ID_2|MOTOR_ID_3|MOTOR_ID_4
-#define MOTOR_ID_CAN1_2_MASK MOTOR_ID_5|MOTOR_ID_6|MOTOR_ID_7|MOTOR_ID_8
-#define MOTOR_ID_CAN2_1_MASK MOTOR_ID_9|MOTOR_ID_10|MOTOR_ID_11|MOTOR_ID_12
-#define MOTOR_ID_CAN2_2_MASK MOTOR_ID_13|MOTOR_ID_14|MOTOR_ID_15|MOTOR_ID_16
+#define MOTOR_ID_CAN1_1_MASK (MOTOR_ID_1|MOTOR_ID_2|MOTOR_ID_3|MOTOR_ID_4)
+#define MOTOR_ID_CAN1_2_MASK (MOTOR_ID_5|MOTOR_ID_6|MOTOR_ID_7|MOTOR_ID_8)
+#define MOTOR_ID_CAN2_1_MASK (MOTOR_ID_9|MOTOR_ID_10|MOTOR_ID_11|MOTOR_ID_12)
+#define MOTOR_ID_CAN2_2_MASK (MOTOR_ID_13|MOTOR_ID_14|MOTOR_ID_15|MOTOR_ID_16)
 
 /*外部变量声明-------------------------------------------------------------*/
 /*外部函数声明-------------------------------------------------------------*/

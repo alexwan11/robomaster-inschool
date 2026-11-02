@@ -10,7 +10,7 @@ PID_Regulator_t pidRegulator = {//此为储存pid参数的结构体，四个底�
         .componentKpMax = 16384,
         .componentKiMax = 0,
         .componentKdMax = 0,
-        .outputMax = 16384 //3508电机输出电流上限，可以调小，勿调大
+        .outputMax = 8000 //3508电机输出电流上限，调试先限流，熟练后再调大，勿超过16384
 };
 
 MOTOR_INIT_t chassisMotorInit = {//四个底盘电机共用的初始化结构体
@@ -27,6 +27,16 @@ Motor CMBR(MOTOR_ID_4,&chassisMotorInit);//定义右后轮电机
 
 uint8_t ChassisStopFlag = 1;
 float FBVelocity,LRVelocity,RTVelocity;
+
+/*
+ * 四个轮子的方向修正系数。
+ * 如果某个轮子实际转向和期望相反，只把对应的一行改成 -1.0f，
+ * 不要去改下面的解算公式。
+ */
+#define CMFL_DIR 1.0f
+#define CMFR_DIR 1.0f
+#define CMBL_DIR 1.0f
+#define CMBR_DIR 1.0f
 
 void ChassisStart(){
 
@@ -74,23 +84,26 @@ void WheelsSpeedCalc(float fbVelocity, float lrVelocity, float rtVelocity) {
 
     //计算四个轮子线速度，单位：m/s
     /**
-     * @brief 此处四句代码需要结合底盘的三个速度，计算处四个轮子的位置对应的线速度。
-     * @param fbVelocity,lrVelocity,rtVelocity
-     * @return CMFLSpeed CMFRSpeed CMBLSpeed CMBRSpeed
+     * @brief 麦轮逆运动学解算：把底盘的前后/左右/旋转速度分解到四个轮子。
+     *        约定：fbVelocity 向前为正，lrVelocity 向右为正，
+     *              rtVelocity 顺时针为正（对应左摇杆向右）。
+     *        (TRACK_WIDTH + WHEEL_BASE) / 2 是麦轮底盘的等效旋转半径。
      */
-    CMFLSpeed = 0;
-    CMFRSpeed = 0;
-    CMBLSpeed = 0;
-    CMBRSpeed = 0;
+    const float rotateRadius = (TRACK_WIDTH + WHEEL_BASE) / 2.0f;
+
+    CMFLSpeed = fbVelocity + lrVelocity + rtVelocity * rotateRadius;
+    CMFRSpeed = fbVelocity - lrVelocity - rtVelocity * rotateRadius;
+    CMBLSpeed = fbVelocity - lrVelocity + rtVelocity * rotateRadius;
+    CMBRSpeed = fbVelocity + lrVelocity - rtVelocity * rotateRadius;
 
     //计算四个轮子角速度，单位：rad/s
     CMFLSpeed = CMFLSpeed /(WHEEL_DIAMETER/2.0f);
     CMFRSpeed = CMFRSpeed /(WHEEL_DIAMETER/2.0f);
     CMBLSpeed = CMBLSpeed /(WHEEL_DIAMETER/2.0f);
     CMBRSpeed = CMBRSpeed /(WHEEL_DIAMETER/2.0f);
-    //控制底盘电机转速
-    CMFL.SetTargetSpeed(RADpS2RPM(CMFLSpeed));
-    CMFR.SetTargetSpeed(RADpS2RPM(CMFRSpeed));
-    CMBL.SetTargetSpeed(RADpS2RPM(CMBLSpeed));
-    CMBR.SetTargetSpeed(RADpS2RPM(CMBRSpeed));
+    //控制底盘电机转速（DIR 只用于修正单个轮子的安装/接线方向）
+    CMFL.SetTargetSpeed(CMFL_DIR * RADpS2RPM(CMFLSpeed));
+    CMFR.SetTargetSpeed(CMFR_DIR * RADpS2RPM(CMFRSpeed));
+    CMBL.SetTargetSpeed(CMBL_DIR * RADpS2RPM(CMBLSpeed));
+    CMBR.SetTargetSpeed(CMBR_DIR * RADpS2RPM(CMBRSpeed));
 }

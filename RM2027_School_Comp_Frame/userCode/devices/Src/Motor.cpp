@@ -15,7 +15,7 @@ uint32_t Motor::motor_IDs;
  * @return 控制量
  */
 float PID::PIDCalc(float target,float feedback) {
-    PIDInfo.fdb = feedback;
+    PIDInfo.fdb = feedback; 
     PIDInfo.ref = target;
     PIDInfo.err[3] = PIDInfo.ref - PIDInfo.fdb;
     PIDInfo.componentKp = PIDInfo.err[3] * PIDInfo.kp;
@@ -38,11 +38,6 @@ float PID::PIDCalc(float target,float feedback) {
  * @callergraph int main(void) in Device.cpp
  */
 void Motor::Init(){
-    HAL_CAN_Start(&hcan1);
-    HAL_CAN_Start(&hcan2);
-    HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING);
-    HAL_CAN_ActivateNotification(&hcan2, CAN_IT_RX_FIFO0_MSG_PENDING);
-
     CAN_FilterTypeDef canFilterTypeDef;
 
     canFilterTypeDef.FilterMode = CAN_FILTERMODE_IDMASK;
@@ -53,11 +48,19 @@ void Motor::Init(){
     canFilterTypeDef.FilterMaskIdLow = 0x0000;
     canFilterTypeDef.FilterFIFOAssignment = CAN_RX_FIFO0;
     canFilterTypeDef.FilterActivation = ENABLE;
+    // CAN1 使用 filter bank 0~13，CAN2 从 bank 14 开始。
+    // 如果 SlaveStartFilterBank 设成 0，CAN1 分不到 filter bank，会收不到电调反馈。
     canFilterTypeDef.FilterBank = 0;
-    canFilterTypeDef.SlaveStartFilterBank = 0;
-
+    canFilterTypeDef.SlaveStartFilterBank = 14;
     HAL_CAN_ConfigFilter(&hcan1, &canFilterTypeDef);
+
+    canFilterTypeDef.FilterBank = 14;
     HAL_CAN_ConfigFilter(&hcan2, &canFilterTypeDef);
+
+    HAL_CAN_Start(&hcan1);
+    HAL_CAN_Start(&hcan2);
+    HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING);
+    HAL_CAN_ActivateNotification(&hcan2, CAN_IT_RX_FIFO0_MSG_PENDING);
 }
 /**
  * @brief can消息包发送任务
@@ -66,6 +69,7 @@ void Motor::Init(){
  */
 void Motor::CANPackageSend() {
     uint8_t canBuf[8];
+    uint32_t txMailbox = 0; // HAL 会通过这个指针返回实际使用的邮箱，不能传常量
 
     CAN_TxHeaderTypeDef txHeaderTypeDef;
 
@@ -81,7 +85,7 @@ void Motor::CANPackageSend() {
             canBuf[2 * i + 1] = motor_intensity[i];
         }
         txHeaderTypeDef.StdId = 0x200;
-        HAL_CAN_AddTxMessage(&hcan1, &txHeaderTypeDef, canBuf, (uint32_t *) CAN_TX_MAILBOX0);
+        HAL_CAN_AddTxMessage(&hcan1, &txHeaderTypeDef, canBuf, &txMailbox);
     }
 
     if(motor_IDs & MOTOR_ID_CAN1_2_MASK) {
@@ -90,7 +94,7 @@ void Motor::CANPackageSend() {
             canBuf[2 * i + 1] = motor_intensity[i + 4];
         }
         txHeaderTypeDef.StdId = 0x1FF;
-        HAL_CAN_AddTxMessage(&hcan1, &txHeaderTypeDef, canBuf, (uint32_t *) CAN_TX_MAILBOX0);
+        HAL_CAN_AddTxMessage(&hcan1, &txHeaderTypeDef, canBuf, &txMailbox);
     }
 
     if(motor_IDs & MOTOR_ID_CAN2_1_MASK) {
@@ -99,7 +103,7 @@ void Motor::CANPackageSend() {
             canBuf[2 * i + 1] = motor_intensity[i + 8];
         }
         txHeaderTypeDef.StdId = 0x200;
-        HAL_CAN_AddTxMessage(&hcan2, &txHeaderTypeDef, canBuf, (uint32_t *) CAN_TX_MAILBOX0);
+        HAL_CAN_AddTxMessage(&hcan2, &txHeaderTypeDef, canBuf, &txMailbox);
     }
 
     if(motor_IDs & MOTOR_ID_CAN2_2_MASK) {
@@ -108,7 +112,7 @@ void Motor::CANPackageSend() {
             canBuf[2 * i + 1] = motor_intensity[i + 12];
         }
         txHeaderTypeDef.StdId = 0x1FF;
-        HAL_CAN_AddTxMessage(&hcan2, &txHeaderTypeDef, canBuf, (uint32_t *) CAN_TX_MAILBOX0);
+        HAL_CAN_AddTxMessage(&hcan2, &txHeaderTypeDef, canBuf, &txMailbox);
     }
 }
 /**
@@ -169,6 +173,12 @@ Motor::~Motor(){
 void Motor::Handle(){
     MotorStateUpdate();
 
+    // 超过 100ms 没有收到该电调的 CAN 反馈，直接切断输出，防止 PID 因反馈为 0 而满输出。
+    if (HAL_GetTick() - lastFeedbackTick > 100) {
+        motor_intensity[GET_MOTOR_POS(deviceID)] = 0;
+        return;
+    }
+
     int16_t intensity = IntensityCalc();
 
     if (stopFlag == 1){
@@ -186,7 +196,15 @@ void Motor::Handle(){
 void Motor::IT_Handle(CAN_HandleTypeDef *hcan) {
     uint8_t canBuf[8];
     CAN_RxHeaderTypeDef rx_header;
-    HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &rx_header, canBuf);
+    if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &rx_header, canBuf) != HAL_OK) {
+        return;
+    }
+
+    // 只处理电调反馈帧 0x201~0x208，其他 CAN 帧（例如裁判系统）直接忽略
+    if (rx_header.StdId < 0x201 || rx_header.StdId > 0x208) {
+        return;
+    }
+
     uint8_t canPos,motorPos;
     if(hcan == &hcan1){
         canPos = 0;
@@ -194,6 +212,13 @@ void Motor::IT_Handle(CAN_HandleTypeDef *hcan) {
         canPos = 1;
     }
     motorPos = rx_header.StdId - 0x201;
+
+    // 该 ID 没有注册电机时不要解引用空指针
+    if (motorPtrs[canPos][motorPos] == nullptr) {
+        return;
+    }
+
+    motorPtrs[canPos][motorPos]->lastFeedbackTick = HAL_GetTick();
     motorPtrs[canPos][motorPos]->feedback.angle = (canBuf[0]<<8u)|canBuf[1];
     motorPtrs[canPos][motorPos]->feedback.speed = (canBuf[2]<<8u)|canBuf[3];
     motorPtrs[canPos][motorPos]->feedback.moment = (canBuf[4]<<8u)|canBuf[5];

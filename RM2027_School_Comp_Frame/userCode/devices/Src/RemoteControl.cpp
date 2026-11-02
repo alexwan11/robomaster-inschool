@@ -62,8 +62,13 @@ void RemoteControl::sbus_to_rc(const volatile uint8_t *sbus_buf) {
     rcInfo.left_col = rc_ctrl.rc.ch[1]/671.0f;
     rcInfo.right_col = rc_ctrl.rc.ch[2]/671.0f;
     rcInfo.left_rol = rc_ctrl.rc.ch[3]/671.0f;
-    rcInfo.sLeft = (SWITCH_STATE_E)rc_ctrl.rc.s[0];
-    rcInfo.sRight = (SWITCH_STATE_E)rc_ctrl.rc.s[1];
+    // 兼容两种接收机输出：1121/1024/1182（DBUS 原始值）或 97/0/158（已减偏移）
+    int32_t sLeftValue = (int32_t)rc_ctrl.rc.s[0];
+    int32_t sRightValue = (int32_t)rc_ctrl.rc.s[1];
+    if (sLeftValue > 512) sLeftValue -= RC_CH_VALUE_OFFSET;
+    if (sRightValue > 512) sRightValue -= RC_CH_VALUE_OFFSET;
+    rcInfo.sLeft = (SWITCH_STATE_E)sLeftValue;
+    rcInfo.sRight = (SWITCH_STATE_E)sRightValue;
     rcInfo.optional[0] = rc_ctrl.rc.optional[0];
     rcInfo.optional[1] = rc_ctrl.rc.optional[1];
 
@@ -101,7 +106,10 @@ void RemoteControl::ITHandle() {
             __HAL_DMA_ENABLE(&hdma_usart3_rx);
 
             if (sbus_rx_buf[0][23]  == 0) {
-                HAL_IWDG_Refresh(&hiwdg);
+                // 只有初始化过 IWDG 才能刷新，否则写空指针会 HardFault
+                if (hiwdg.Instance != nullptr) {
+                    HAL_IWDG_Refresh(&hiwdg);
+                }
             }
             if (this_time_rx_len == RC_FRAME_LENGTH) {
                 RemoteControl::sbus_to_rc(RemoteControl::sbus_rx_buf[0]);
@@ -129,7 +137,10 @@ void RemoteControl::ITHandle() {
             __HAL_DMA_ENABLE(&hdma_usart3_rx);
 
             if (sbus_rx_buf[1][23]  == 0) {
-                HAL_IWDG_Refresh(&hiwdg);
+                // 只有初始化过 IWDG 才能刷新，否则写空指针会 HardFault
+                if (hiwdg.Instance != nullptr) {
+                    HAL_IWDG_Refresh(&hiwdg);
+                }
             }
             if (this_time_rx_len == RC_FRAME_LENGTH) {
                 //处理遥控器数据
